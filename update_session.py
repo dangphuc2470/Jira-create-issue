@@ -77,11 +77,47 @@ def process_curl_command(curl_command):
         
         # Extract URL
         url_match = re.search(r"curl '([^']+)'", curl_command)
-        base_url = url_match.group(1).split('/secure/')[0] if url_match else "http://qlda.gpdn.viettel.vn"
+        base_url = url_match.group(1) if url_match else "http://qlda.gpdn.viettel.vn/secure/QuickCreateIssue.jspa?decorator=none"
         
-        if not all([cookies, atl_token, form_token]):
+        # Extract data payload and convert to template
+        data_match = re.search(r"--data-raw '([^']+)'", curl_command)
+        data_payload = data_match.group(1) if data_match else None
+        
+        if not all([cookies, atl_token, form_token, data_payload]):
             print("Error: Could not extract all required session data from curl command.")
+            print(f"Cookies: {'✓' if cookies else '✗'}")
+            print(f"ATL Token: {'✓' if atl_token else '✗'}")
+            print(f"Form Token: {'✓' if form_token else '✗'}")
+            print(f"Data Payload: {'✓' if data_payload else '✗'}")
             return False
+        
+        # Convert data payload to template with placeholders
+        data_template = data_payload
+        
+        # Replace specific summary with placeholder
+        summary_match = re.search(r'summary=([^&]+)', data_template)
+        if summary_match:
+            data_template = data_template.replace(f'summary={summary_match.group(1)}', 'summary={SUMMARY}')
+        
+        # Replace specific dates with placeholders
+        # Find and replace start date (customfield_10519)
+        start_date_match = re.search(r'customfield_10519=([^&]+)', data_template)
+        if start_date_match:
+            data_template = data_template.replace(f'customfield_10519={start_date_match.group(1)}', 'customfield_10519={START_DATE}')
+        
+        # Find and replace due date
+        due_date_match = re.search(r'duedate=([^&]+)', data_template)
+        if due_date_match:
+            data_template = data_template.replace(f'duedate={due_date_match.group(1)}', 'duedate={END_DATE}')
+        
+        # Find and replace actual date (customfield_10603)
+        actual_date_match = re.search(r'customfield_10603=([^&]+)', data_template)
+        if actual_date_match:
+            data_template = data_template.replace(f'customfield_10603={actual_date_match.group(1)}', 'customfield_10603={ACTUAL_DATE}')
+        
+        # Replace tokens with placeholders
+        data_template = data_template.replace(f'atl_token={atl_token}', 'atl_token={ATL_TOKEN}')
+        data_template = data_template.replace(f'formToken={form_token}', 'formToken={FORM_TOKEN}')
         
         # Load existing config or create new one
         config = {}
@@ -98,13 +134,14 @@ def process_curl_command(curl_command):
             'cookies': cookies,
             'atl_token': atl_token,
             'form_token': form_token,
+            'data_payload_template': data_template,
             'headers': {
                 'Accept': '*/*',
                 'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
                 'Connection': 'keep-alive',
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                 'DNT': '1',
-                'Origin': base_url,
+                'Origin': base_url.split('/secure')[0] if '/secure' in base_url else base_url,
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0',
                 'X-Requested-With': 'XMLHttpRequest'
             }
@@ -119,6 +156,7 @@ def process_curl_command(curl_command):
         print(f"📄 JSESSIONID: {jsessionid}")
         print(f"🔑 ATL Token: {atl_token[:20]}...")
         print(f"📝 Form Token: {form_token[:20]}...")
+        print(f"📦 Data Template: {data_template[:100]}...")
         print("\nYou can now run jira.py to generate curl commands with the new session.")
         
         return True
