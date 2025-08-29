@@ -3,6 +3,7 @@ import urllib.parse
 import json
 import os
 from datetime import datetime
+import calendar
 
 # --- Configuration ---
 INPUT_EXCEL_FILE = "input_data.xlsx"
@@ -33,10 +34,11 @@ def build_curl_template(config):
         header_parts.append(f"--header '{key}: {value}'")
     
     # Build the curl template
-    curl_template = f"""curl --location '{config['base_url']}' \\
-{' \\'.join([chr(10) + h for h in header_parts])} \\
+    header_lines = ' \\\n'.join(header_parts)
+    curl_template = f"""curl --location --request POST '{config['base_url']}' \\
+{header_lines} \\
 --header 'Cookie: {config['cookies']}' \\
---data '{{DATA_PAYLOAD}}' \\
+--data-raw '{{DATA_PAYLOAD}}' \\
 --insecure"""
     
     return curl_template, config['data_payload_template']
@@ -85,10 +87,21 @@ def generate_curl_command_for_jira(start_date_input, end_date_input, summary_tex
         end_date_obj = datetime.strptime(end_date_str, "%d/%m/%Y")
         actual_date_obj = datetime.strptime(actual_date_str, "%d/%m/%Y")
 
+        # --- Step 2.5: Calculate end of month for the end date ---
+        # Get the last day of the month for the end date
+        last_day_of_month = calendar.monthrange(end_date_obj.year, end_date_obj.month)[1]
+        end_date_obj = end_date_obj.replace(day=last_day_of_month)
+
         # --- Step 3: Format the datetime objects into Jira's required "d/MM/yy" format ---
-        formatted_start_date = start_date_obj.strftime("%#d/%m/%y")
-        formatted_end_date = end_date_obj.strftime("%#d/%m/%y")
-        formatted_actual_date = actual_date_obj.strftime("%#d/%m/%y")
+        # Use %d for day without leading zero, %m for month with leading zero, %y for 2-digit year
+        formatted_start_date = start_date_obj.strftime("%d/%m/%y").lstrip("0")
+        formatted_end_date = end_date_obj.strftime("%d/%m/%y").lstrip("0")
+        formatted_actual_date = actual_date_obj.strftime("%d/%m/%y").lstrip("0")
+
+        # --- Step 4: Calculate remaining estimate in days ---
+        # Calculate the difference between actual date and start date
+        time_difference = actual_date_obj - start_date_obj
+        remaining_estimate_days = max(0, time_difference.days)  # Ensure it's not negative
 
     except ValueError as e:
         print(f"Date format error: {e}. Please ensure dates in Excel are in DD/MM/YYYY format.")
@@ -110,7 +123,8 @@ def generate_curl_command_for_jira(start_date_input, end_date_input, summary_tex
         SUMMARY=encoded_summary,
         START_DATE=encoded_start_date,
         END_DATE=encoded_end_date,
-        ACTUAL_DATE=encoded_actual_date
+        ACTUAL_DATE=encoded_actual_date,
+        REMAINING_ESTIMATE=remaining_estimate_days
     )
 
     # --- Step 6: Insert the populated data payload into the base curl template ---
@@ -151,6 +165,9 @@ def main():
             summary = summary_cell.value
             # Set actual_date to be the same as end_date
             actual_date = end_date
+
+            # Add [Mobile] to the summary
+            summary = f"[Mobile] {summary}"
 
             # Check if all required data for the row is present
             if start_date is None or end_date is None or summary is None:
